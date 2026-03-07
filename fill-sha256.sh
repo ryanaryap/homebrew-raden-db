@@ -1,0 +1,130 @@
+#!/usr/bin/env bash
+# fill-sha256.sh — populate SHA256 in MySQL formula files before pushing to GitHub.
+# Downloads each binary from the official Oracle CDN, computes SHA256, updates .rb.
+#
+# Usage:
+#   ./fill-sha256.sh            # fill all formulas
+#   ./fill-sha256.sh mysql@9.4  # fill one formula
+#   ./fill-sha256.sh --check    # check URLs only (no download)
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+FORMULA_DIR="$SCRIPT_DIR/Formula"
+
+ARCH=$(uname -m)
+CHECK_ONLY=0
+TARGET="${1:-all}"
+[[ "${1:-}" == "--check" ]] && CHECK_ONLY=1 && TARGET="all"
+
+RED='\033[0;31m'; YEL='\033[0;33m'; GRN='\033[0;32m'; NC='\033[0m'
+ok()   { echo -e "${GRN}\u2713${NC} $*"; }
+err()  { echo -e "${RED}\u2717${NC} $*" >&2; }
+warn() { echo -e "${YEL}!${NC} $*"; }
+info() { echo "  \u2192 $*"; }
+
+# MySQL download URL — macOS version depends on MySQL minor
+mysql_url() {
+  local ver arch mac_ver
+  ver="$1"; arch="$2"
+  case "$ver" in
+    9.0.*|9.1.*) mac_ver="macos14" ;;
+    *)           mac_ver="macos15" ;;
+  esac
+  echo "https://downloads.mysql.com/archives/get/p/23/file/mysql-${ver}-${mac_ver}-${arch}.tar.gz"
+}
+mysql_url_alt() {
+  local ver arch
+  ver="$1"; arch="$2"
+  case "$ver" in
+    9.0.*|9.1.*) echo "https://downloads.mysql.com/archives/get/p/23/file/mysql-${ver}-macos15-${arch}.tar.gz" ;;
+    *)           echo "https://downloads.mysql.com/archives/get/p/23/file/mysql-${ver}-macos14-${arch}.tar.gz" ;;
+  esac
+}
+
+url_ok() {
+  local code
+  code=$(curl -sSL --head --write-out '%{http_code}' -o /dev/null --max-time 15 "$1" 2>/dev/null || echo "000")
+  [[ "$code" == "200" || "$code" == "302" ]]
+}
+
+resolve_url() {
+  local ver arch primary alt
+  ver="$1"; arch="$2"
+  primary=$(mysql_url "$ver" "$arch")
+  alt=$(mysql_url_alt "$ver" "$arch")
+  if url_ok "$primary"; then echo "$primary"; return 0; fi
+  if url_ok "$alt";     then echo "$alt";     return 0; fi
+  return 1
+}
+
+sha256_url() { curl -sSL "$1" | shasum -a 256 | awk '{print $1}'; }
+
+update_sha256() {
+  local file placeholder hash
+  file="$1"; placeholder="$2"; hash="$3"
+  grep -q "\"$placeholder\"" "$file" || return 1
+  sed -i '' "s|\"$placeholder\"|\"$hash\"|g" "$file"
+}
+
+process() {
+  local name rb all_ok patch_ver arch placeholder resolved_url hash
+  name="$1"
+  rb="$FORMULA_DIR/${name}.rb"
+  [[ -f "$rb" ]] || { err "Formula not found: $rb"; return 1; }
+  echo ""
+  echo "-- $name --"
+
+  local patch_ver
+  patch_ver=$(grep -m1 '^\s*version "' "$rb" | sed 's/.*version "\(.*\)"/\1/' | tr -d '[:space:]')
+  [[ -z "$patch_ver" ]] && patch_ver="$(echo "$name" | cut -d@ -f2).0"
+  info "Patch version: $patch_ver"
+
+  local all_ok=1
+  for arch in arm64 x86_64; do
+    local placeholder
+    [[ "$arch" == "arm64" ]] && placeholder="FILL_SHA256_ARM64" || placeholder="FILL_SHA256_X86"
+    if ! grep -q "\"$placeholder\"" "$rb" 2>/dev/null; then
+      ok "$arch: already filled"; continue
+    fi
+
+    info "Resolving $arch URL..."
+    local resolved_url
+    if ! resolved_url=$(resolve_url "$patch_ver" "$arch"); then
+      err "$arch: no working URL found"; all_ok=0; continue
+    fi
+    ok "$arch URL: $resolved_url"
+    [[ "$CHECK_ONLY" == "1" ]] && continue
+
+    info "Downloading and computing SHA256 (~300-600 MB)..."
+    local hash; hash=$(sha256_url "$resolved_url")
+    ok "$arch SHA256: $hash"
+    sed -i '' "s|url \"[^\"]*mysql-${patch_ver}[^\"]*${arch}[^\"]*\"|url \"$resolved_url\"|g" "$rb" 2>/dev/null || true
+    update_sha256 "$rb" "$placeholder" "$hash" && ok "$arch: formula updated" || warn "$arch: already replaced"
+  done
+  [[ "$all_ok" == "1" ]] && ok "$name: done" || warn "$name: check errors above"
+}
+
+echo "============================================="
+echo " homebrew-raden-db SHA256 filler"
+echo " Architecture: $ARCH"
+[[ "$CHECK_ONLY" == "1" ]] && echo " Mode: URL check only (no download)"
+echo "============================================="
+
+if [[ "$TARGET" == "all" ]]; then
+  for f in mysql@9.4 mysql@9.3 mysql@9.2 mysql@9.1 mysql@9.0; do
+    process "$f" || true
+  done
+else
+  process "$TARGET"
+fi
+
+echo ""
+echo "Formulas with FILL_SHA256 placeholders remaining:"
+found=0
+for rb in "$FORMULA_DIR"/*.rb; do
+  if grep -q "FILL_SHA256" "$rb" 2>/dev/null; then
+    echo "  x $(basename "$rb" .rb)"; found=1
+  fi
+done
+[[ "$found" == "0" ]] && echo "  (none - all filled!)"
+echo ""
+echo "Next: git add . && git commit -m 'Fill SHA256' && git push"
