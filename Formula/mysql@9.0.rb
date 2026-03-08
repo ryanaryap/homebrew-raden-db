@@ -34,18 +34,18 @@ class MysqlAT90 < Formula
     return if (var/"mysql@9.0/mysql").exist?
 
     system opt_bin/"mysqld", "--initialize-insecure",
-           "--user=\#{ENV["USER"]}",
-           "--basedir=\#{opt_prefix}",
-           "--datadir=\#{var}/mysql@9.0",
+           "--user=#{ENV['USER']}",
+           "--basedir=#{opt_prefix}",
+           "--datadir=#{var}/mysql@9.0",
            "--tmpdir=/tmp"
   end
 
   service do
     run [opt_bin/"mysqld_safe",
-         "--datadir=\#{var}/mysql@9.0",
-         "--pid-file=\#{var}/mysql@9.0/mysqld.pid",
-         "--socket=\#{var}/mysql@9.0/mysql.sock",
-         "--log-error=\#{var}/log/mysql@9.0/error.log"]
+         "--datadir=#{var}/mysql@9.0",
+         "--pid-file=#{var}/mysql@9.0/mysqld.pid",
+         "--socket=#{var}/mysql@9.0/mysql.sock",
+         "--log-error=#{var}/log/mysql@9.0/error.log"]
     run_type :immediate
     working_dir HOMEBREW_PREFIX
     keep_alive true
@@ -55,11 +55,11 @@ class MysqlAT90 < Formula
 
   def caveats
     <<~EOS
-      MySQL 9.0 data directory: \#{var}/mysql@9.0
+      MySQL 9.0 data directory: #{var}/mysql@9.0
 
       Start:   brew services start ryanaryap/raden-db/mysql@9.0
       Stop:    brew services stop ryanaryap/raden-db/mysql@9.0
-      Connect: mysql -u root --socket \#{var}/mysql@9.0/mysql.sock
+      Connect: mysql -u root --socket #{var}/mysql@9.0/mysql.sock
 
       The initial root account has no password. Set one with:
         ALTER USER 'root'@'localhost' IDENTIFIED BY 'yourpassword';
@@ -67,6 +67,6 @@ class MysqlAT90 < Formula
   end
 
   test do
-    assert_match "9.0", shell_output("\#{bin}/mysqld --version 2>&1")
+    assert_match "9.0", shell_output("#{bin}/mysqld --version 2>&1")
   end
 end
