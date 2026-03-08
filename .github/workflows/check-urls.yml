@@ -1,0 +1,107 @@
+name: Check Formula URLs
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"   # Every Monday at 06:00 UTC
+  workflow_dispatch:        # Manual trigger from GitHub UI
+
+jobs:
+  check-urls:
+    name: Verify all download URLs
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract and check URLs
+        id: check
+        run: |
+          set +e
+          FAILED=0
+          REPORT=""
+
+          for rb in Formula/mysql@*.rb; do
+            name=$(basename "$rb" .rb)
+            arm_url=$(grep -A2 'on_arm do' "$rb" | grep 'url' | sed 's/.*url "//;s/"//')
+            intel_url=$(grep -A2 'on_intel do' "$rb" | grep 'url' | sed 's/.*url "//;s/"//')
+
+            for url in "$arm_url" "$intel_url"; do
+              code=$(curl -sIo /dev/null -w "%{http_code}" "$url")
+              if [ "$code" = "200" ]; then
+                echo "  ✓ $name: $url"
+              else
+                echo "  ✗ $name ($code): $url"
+                REPORT="$REPORT\n- [$name] HTTP $code: $url"
+                FAILED=1
+              fi
+            done
+          done
+
+          if [ "$FAILED" -eq 1 ]; then
+            echo "broken_urls=true" >> "$GITHUB_OUTPUT"
+            echo "report<<EOF" >> "$GITHUB_OUTPUT"
+            printf "%b" "$REPORT" >> "$GITHUB_OUTPUT"
+            echo "EOF" >> "$GITHUB_OUTPUT"
+          else
+            echo "broken_urls=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Ensure GitHub labels exist
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const needed = [
+              { name: 'url-broken',   color: 'd93f0b', description: 'A download URL in the tap is broken' },
+              { name: 'maintenance',  color: 'e4e669', description: 'Routine tap maintenance work' },
+              { name: 'new-release',  color: '0075ca', description: 'New upstream release available' },
+            ];
+            for (const label of needed) {
+              try {
+                await github.rest.issues.createLabel({
+                  owner: context.repo.owner, repo: context.repo.repo, ...label
+                });
+              } catch (e) {
+                if (e.status !== 422) throw e; // 422 = already exists, ignore
+              }
+            }
+
+      - name: Open issue on broken URLs
+        if: steps.check.outputs.broken_urls == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = `⚠️ Broken download URLs detected (${new Date().toISOString().slice(0,10)})`;
+            const body = [
+              "The weekly URL check found one or more broken download URLs in the formula files.",
+              "",
+              "**Broken URLs:**",
+              "${{ steps.check.outputs.report }}",
+              "",
+              "### Fix steps",
+              "1. Check if new patch versions are available: run `./update-formula.sh --check`",
+              "2. If new versions exist, run `./update-formula.sh` to update SHA256",
+              "3. Push the updated formulas: `git add . && git commit -m 'fix: update formula URLs' && git push`",
+            ].join("\n");
+
+            // Check for existing open issue with same title prefix
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: "open",
+              labels: "url-broken",
+            });
+            const exists = issues.data.some(i => i.title.startsWith("⚠️ Broken download URLs"));
+
+            if (!exists) {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: ["url-broken", "maintenance"],
+              });
+              core.info("Issue created.");
+            } else {
+              core.info("Existing open issue found — skipping duplicate.");
+            }

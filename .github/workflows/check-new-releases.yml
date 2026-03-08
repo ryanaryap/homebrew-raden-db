@@ -1,0 +1,133 @@
+name: Check for New MySQL Releases
+
+on:
+  schedule:
+    - cron: "0 7 * * 1"   # Every Monday at 07:00 UTC (1h after URL check)
+  workflow_dispatch:
+
+jobs:
+  check-releases:
+    name: Detect new MySQL patch versions
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Detect newer patch versions on MySQL CDN
+        id: detect
+        run: |
+          set +e
+          UPDATES=""
+          FOUND=0
+
+          mac_ver_for() {
+            case "$1" in
+              9.0|9.1) echo "macos14" ;;
+              *)       echo "macos15" ;;
+            esac
+          }
+
+          cdn_url() {
+            local ver="$1" arch="$2"
+            local minor="${ver%.*}"
+            local mac; mac=$(mac_ver_for "$minor")
+            echo "https://downloads.mysql.com/archives/get/p/23/file/mysql-${ver}-${mac}-${arch}.tar.gz"
+          }
+
+          for rb in Formula/mysql@*.rb; do
+            name=$(basename "$rb" .rb)
+            minor="${name#mysql@}"
+            current=$(grep -m1 'version "' "$rb" | sed 's/.*version "//;s/"//')
+            patch="${current##*.}"
+            major_mid="${current%.*}"
+
+            echo "Checking $name (current: $current)..."
+            for delta in 1 2 3 4 5; do
+              try_patch=$(( patch + delta ))
+              try_ver="${major_mid}.${try_patch}"
+              url=$(cdn_url "$try_ver" "arm64")
+              code=$(curl -sIo /dev/null -w "%{http_code}" "$url")
+              if [ "$code" = "200" ]; then
+                echo "  ↑ New: $try_ver"
+                UPDATES="$UPDATES\n- **$name**: $current → $try_ver"
+                FOUND=1
+                break
+              fi
+            done
+          done
+
+          echo "found_updates=$FOUND" >> "$GITHUB_OUTPUT"
+          {
+            echo "updates<<EOF"
+            printf "%b" "$UPDATES"
+            echo ""
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Ensure GitHub labels exist
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const needed = [
+              { name: 'new-release',  color: '0075ca', description: 'New upstream release available' },
+              { name: 'maintenance',  color: 'e4e669', description: 'Routine tap maintenance work' },
+            ];
+            for (const label of needed) {
+              try {
+                await github.rest.issues.createLabel({
+                  owner: context.repo.owner, repo: context.repo.repo, ...label
+                });
+              } catch (e) {
+                if (e.status !== 422) throw e;
+              }
+            }
+
+      - name: Open issue for new releases
+        if: steps.detect.outputs.found_updates == '1'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const today = new Date().toISOString().slice(0, 10);
+            const title = `🆕 New MySQL patch versions available (${today})`;
+            const body = [
+              "The weekly release check found new MySQL patch versions available on the MySQL CDN.",
+              "",
+              "**Pending updates:**",
+              "${{ steps.detect.outputs.updates }}",
+              "",
+              "### How to update",
+              "```bash",
+              "# In RADEN/scripts/homebrew-raden-db/",
+              "./update-formula.sh           # update all",
+              "# OR update a specific version:",
+              "./update-formula.sh 9.4",
+              "",
+              "git add Formula/",
+              "git commit -m 'chore: bump MySQL formulas to latest patch'",
+              "git push",
+              "```",
+              "",
+              "> After pushing, `brew update` on any machine with this tap will pick up the new versions.",
+            ].join("\n");
+
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: "open",
+              labels: "new-release",
+            });
+            const exists = issues.data.some(i => i.title.startsWith("🆕 New MySQL patch"));
+
+            if (!exists) {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: ["new-release", "maintenance"],
+              });
+              core.info("Release issue created.");
+            } else {
+              core.info("Open release issue already exists — skipping.");
+            }

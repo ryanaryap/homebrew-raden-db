@@ -1,61 +1,106 @@
 # homebrew-raden-db
 
-Custom Homebrew tap for **RADEN** – provides pinned MySQL 9.x versions as pre-built official binaries (no compilation from source).
+> Homebrew tap for **RADEN** — pre-built MySQL 9.x binaries for macOS (arm64 + x86_64).
 
-## Formulas in this tap
+[![Check Formula URLs](https://github.com/ryanaryap/homebrew-raden-db/actions/workflows/check-urls.yml/badge.svg)](https://github.com/ryanaryap/homebrew-raden-db/actions/workflows/check-urls.yml)
+[![Check New Releases](https://github.com/ryanaryap/homebrew-raden-db/actions/workflows/check-new-releases.yml/badge.svg)](https://github.com/ryanaryap/homebrew-raden-db/actions/workflows/check-new-releases.yml)
 
-| Formula | Version | Binary source |
-|---|---|---|
-| `mysql@9.4` | 9.4.0 | downloads.mysql.com (macos15, arm64 + x86_64) |
-| `mysql@9.3` | 9.3.0 | downloads.mysql.com (macos15, arm64 + x86_64) |
-| `mysql@9.2` | 9.2.0 | downloads.mysql.com (macos15, arm64 + x86_64) |
-| `mysql@9.1` | 9.1.0 | downloads.mysql.com (macos14, arm64 + x86_64) |
-| `mysql@9.0` | 9.0.1 | downloads.mysql.com (macos14, arm64 + x86_64) |
+---
 
-> **Why only MySQL 9.x?**  
-> MariaDB only publishes Linux binary tarballs — macOS is covered by homebrew-core.  
-> MySQL 5.7/8.x are in homebrew-core. MySQL 9.x pinned versions are not in homebrew-core.
+## Why this tap?
 
-**Versions already in homebrew-core** (no tap needed, install directly):
-- MySQL: `mysql` (latest 9.x), `mysql@8.4`, `mysql@8.0`
-- MariaDB: `mariadb`, `mariadb@10.11`, `mariadb@11.4`, `mariadb@11.5`, `mariadb@11.6`
-- PostgreSQL: `postgresql@13` through `postgresql@17`
+Homebrew-core only keeps the **latest stable** MySQL release. If you need pinned older MySQL 9.x minor versions (for testing, production parity, or client-specific requirements), homebrew-core regularly removes them when a new minor is released.
 
-## Setup (for developers publishing this tap)
+This tap installs **official Oracle pre-built binaries** directly from `downloads.mysql.com/archives` — no compilation, no waiting.
 
-### 1. Fill SHA256 checksums (do this once)
+---
+
+## Available formulas
+
+| Formula | MySQL Version | macOS Support | Arch |
+|---|---|---|---|
+| `mysql@9.4` | 9.4.0 | macOS 15 (Sequoia)+ | arm64, x86_64 |
+| `mysql@9.3` | 9.3.0 | macOS 15 (Sequoia)+ | arm64, x86_64 |
+| `mysql@9.2` | 9.2.0 | macOS 15 (Sequoia)+ | arm64, x86_64 |
+| `mysql@9.1` | 9.1.0 | macOS 14 (Sonoma)+ | arm64, x86_64 |
+| `mysql@9.0` | 9.0.1 | macOS 14 (Sonoma)+ | arm64, x86_64 |
+
+> **Note:** MySQL 5.7, MySQL 8.x, and MariaDB 10.3–10.6 are **not included** because Oracle/MariaDB
+> Foundation does not publish macOS binary tarballs for those versions in their archive servers.
+>
+> For MySQL 8.0, 8.4, and latest MySQL 9.x → use `homebrew-core` (`brew install mysql@8.4`).
+> For MariaDB 10.11+ → use `homebrew-core` (`brew install mariadb@10.11`).
+
+---
+
+## Install
+
 ```bash
-cd scripts/homebrew-raden-db
-chmod +x fill-sha256.sh
-./fill-sha256.sh --check   # verify URLs first (fast, no download)
-./fill-sha256.sh           # fill SHA256 for all formulas
+brew tap ryanaryap/raden-db
+brew install ryanaryap/raden-db/mysql@9.4
 ```
 
-### 2. Push to GitHub
+### Start / Stop MySQL via brew services
+
 ```bash
-cd scripts/homebrew-raden-db
-chmod +x setup-github.sh
-./setup-github.sh YOUR_GITHUB_USERNAME
+brew services start ryanaryap/raden-db/mysql@9.4
+brew services stop  ryanaryap/raden-db/mysql@9.4
 ```
 
-### 3. Configure RADEN tap
+### Connect
+
 ```bash
-echo 'RADEN_DB_TAP="YOUR_GITHUB_USERNAME/raden-db"' >> ~/.raden/config.sh
+mysql -u root --socket $(brew --prefix)/var/mysql@9.4/mysql.sock
 ```
 
-## Usage (for end users via RADEN app)
+---
 
-RADEN handles tapping and installation automatically. Manual usage:
-```bash
-brew tap YOUR_GITHUB_USERNAME/raden-db
-brew install YOUR_GITHUB_USERNAME/raden-db/mysql@9.4
-brew install YOUR_GITHUB_USERNAME/raden-db/mariadb@10.6
+## How binaries are sourced
+
+All binaries come directly from the **official MySQL CDN**:
+
+```
+https://downloads.mysql.com/archives/get/p/23/file/mysql-{VERSION}-{macos14|macos15}-{arm64|x86_64}.tar.gz
 ```
 
-## Architecture
+SHA256 hashes are computed from the official downloads and embedded in each formula.
+Homebrew verifies these automatically at install time.
 
-All formulas download **official pre-built binaries** directly from:
-- MySQL: `downloads.mysql.com` (Oracle official CDN)
-- MariaDB: `archive.mariadb.org` (MariaDB Foundation official archive)
+---
 
-No cmake, no compilation, no 30-minute builds.
+## Long-term maintenance
+
+### Automated CI (GitHub Actions — every Monday)
+
+| Workflow | What it does |
+|---|---|
+| **Check Formula URLs** | Verifies all 10 download URLs (5 formulas × 2 arch) return HTTP 200. Opens a GitHub issue if any are broken. |
+| **Check New Releases** | Probes the MySQL CDN for newer patch versions. Opens a GitHub issue with update instructions if found. |
+
+### Manual update script
+
+When a new MySQL patch drops (e.g., 9.4.1):
+
+```bash
+cd RADEN/scripts/homebrew-raden-db
+
+# Dry-run: see what would be updated
+./update-formula.sh --check
+
+# Apply updates (downloads ~300-600 MB per formula to compute SHA256)
+./update-formula.sh          # all versions
+./update-formula.sh 9.4      # specific version only
+
+# Push
+git add Formula/
+git commit -m "chore: bump MySQL formulas to latest patch"
+git push
+```
+
+---
+
+## License
+
+Tap scripts: MIT.
+MySQL binaries: [GPL-2.0](https://www.gnu.org/licenses/old-licenses/gpl-2.0.html) — downloaded
+from Oracle's official servers, not redistributed here.
