@@ -21,23 +21,52 @@ err()  { echo -e "${RED}\u2717${NC} $*" >&2; }
 warn() { echo -e "${YEL}!${NC} $*"; }
 info() { echo "  \u2192 $*"; }
 
+# macOS build version per MySQL patch release
+# Returns the macos<N> string that Oracle shipped that version for.
+mysql_mac_ver() {
+  local ver="$1"
+  case "$ver" in
+    8.0.26|8.0.27)         echo "macos11" ;;
+    8.0.28|8.0.29|8.0.30|\
+    8.0.31)                echo "macos12" ;;
+    8.0.32|8.0.33|8.0.34|\
+    8.0.35)                echo "macos13" ;;
+    8.0.36|8.0.37|8.0.38|\
+    8.0.39|8.0.40)         echo "macos14" ;;
+    8.0.4*|8.0.3[6-9])     echo "macos14" ;;
+    8.0.41|8.0.42|8.0.43|\
+    8.0.44)                echo "macos15" ;;
+    8.1.*)                 echo "macos13" ;;
+    8.2.*)                 echo "macos13" ;;
+    8.3.*)                 echo "macos14" ;;
+    8.4.0|8.4.1|8.4.2|\
+    8.4.3)                 echo "macos14" ;;
+    8.4.4|8.4.5|8.4.6|\
+    8.4.7)                 echo "macos15" ;;
+    9.0.*|9.1.*)           echo "macos14" ;;
+    9.*)                   echo "macos15" ;;
+    *)                     echo "macos15" ;;
+  esac
+}
+
 # MySQL download URL — uses cdn.mysql.com direct links (no redirects for Homebrew SHA256 verification)
 mysql_url() {
   local ver arch mac_ver
   ver="$1"; arch="$2"
-  case "$ver" in
-    9.0.*|9.1.*) mac_ver="macos14" ;;
-    *)           mac_ver="macos15" ;;
-  esac
+  mac_ver=$(mysql_mac_ver "$ver")
   echo "https://cdn.mysql.com/archives/mysql-${ver%.*}/mysql-${ver}-${mac_ver}-${arch}.tar.gz"
 }
 mysql_url_alt() {
-  local ver arch
+  local ver arch mac_ver
   ver="$1"; arch="$2"
-  # Alternate: try the other macOS version as fallback
-  case "$ver" in
-    9.0.*|9.1.*) echo "https://cdn.mysql.com/archives/mysql-${ver%.*}/mysql-${ver}-macos15-${arch}.tar.gz" ;;
-    *)           echo "https://cdn.mysql.com/archives/mysql-${ver%.*}/mysql-${ver}-macos14-${arch}.tar.gz" ;;
+  # Alternate: try adjacent macOS version as fallback
+  mac_ver=$(mysql_mac_ver "$ver")
+  case "$mac_ver" in
+    macos11) echo "https://cdn.mysql.com/archives/mysql-${ver%.*}/mysql-${ver}-macos12-${arch}.tar.gz" ;;
+    macos12) echo "https://cdn.mysql.com/archives/mysql-${ver%.*}/mysql-${ver}-macos13-${arch}.tar.gz" ;;
+    macos13) echo "https://cdn.mysql.com/archives/mysql-${ver%.*}/mysql-${ver}-macos14-${arch}.tar.gz" ;;
+    macos14) echo "https://cdn.mysql.com/archives/mysql-${ver%.*}/mysql-${ver}-macos15-${arch}.tar.gz" ;;
+    macos15) echo "https://cdn.mysql.com/archives/mysql-${ver%.*}/mysql-${ver}-macos14-${arch}.tar.gz" ;;
   esac
 }
 
@@ -111,7 +140,8 @@ echo " Architecture: $ARCH"
 echo "============================================="
 
 if [[ "$TARGET" == "all" ]]; then
-  for f in mysql@9.5 mysql@9.4 mysql@9.3 mysql@9.2 mysql@9.1 mysql@9.0; do
+  for f in mysql@9.5 mysql@9.4 mysql@9.3 mysql@9.2 mysql@9.1 mysql@9.0 \
+            mysql@8.4 mysql@8.3 mysql@8.2 mysql@8.1 mysql@8.0; do
     process "$f" || true
   done
 else
