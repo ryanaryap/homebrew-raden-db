@@ -6,12 +6,12 @@ class MysqlAT92 < Formula
   keg_only :versioned_formula
 
   on_arm do
-    url "https://downloads.mysql.com/archives/get/p/23/file/mysql-9.2.0-macos15-arm64.tar.gz"
+    url "https://cdn.mysql.com/archives/mysql-9.2/mysql-9.2.0-macos15-arm64.tar.gz"
     sha256 "b00639f8a1da97a64031997467f5d8c899e1977a2750cf4bbbcb1b4417cb8a44"
   end
 
   on_intel do
-    url "https://downloads.mysql.com/archives/get/p/23/file/mysql-9.2.0-macos15-x86_64.tar.gz"
+    url "https://cdn.mysql.com/archives/mysql-9.2/mysql-9.2.0-macos15-x86_64.tar.gz"
     sha256 "e73048bbcca244845fc0c0115acba556875ccbbb352e400559fdb85e5d6e0113"
   end
 

@@ -21,7 +21,7 @@ err()  { echo -e "${RED}\u2717${NC} $*" >&2; }
 warn() { echo -e "${YEL}!${NC} $*"; }
 info() { echo "  \u2192 $*"; }
 
-# MySQL download URL — macOS version depends on MySQL minor
+# MySQL download URL — uses cdn.mysql.com direct links (no redirects for Homebrew SHA256 verification)
 mysql_url() {
   local ver arch mac_ver
   ver="$1"; arch="$2"
@@ -29,14 +29,15 @@ mysql_url() {
     9.0.*|9.1.*) mac_ver="macos14" ;;
     *)           mac_ver="macos15" ;;
   esac
-  echo "https://downloads.mysql.com/archives/get/p/23/file/mysql-${ver}-${mac_ver}-${arch}.tar.gz"
+  echo "https://cdn.mysql.com/archives/mysql-${ver%.*}/mysql-${ver}-${mac_ver}-${arch}.tar.gz"
 }
 mysql_url_alt() {
   local ver arch
   ver="$1"; arch="$2"
+  # Alternate: try the other macOS version as fallback
   case "$ver" in
-    9.0.*|9.1.*) echo "https://downloads.mysql.com/archives/get/p/23/file/mysql-${ver}-macos15-${arch}.tar.gz" ;;
-    *)           echo "https://downloads.mysql.com/archives/get/p/23/file/mysql-${ver}-macos14-${arch}.tar.gz" ;;
+    9.0.*|9.1.*) echo "https://cdn.mysql.com/archives/mysql-${ver%.*}/mysql-${ver}-macos15-${arch}.tar.gz" ;;
+    *)           echo "https://cdn.mysql.com/archives/mysql-${ver%.*}/mysql-${ver}-macos14-${arch}.tar.gz" ;;
   esac
 }
 
@@ -110,7 +111,7 @@ echo " Architecture: $ARCH"
 echo "============================================="
 
 if [[ "$TARGET" == "all" ]]; then
-  for f in mysql@9.4 mysql@9.3 mysql@9.2 mysql@9.1 mysql@9.0; do
+  for f in mysql@9.5 mysql@9.4 mysql@9.3 mysql@9.2 mysql@9.1 mysql@9.0; do
     process "$f" || true
   done
 else
